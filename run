@@ -1,0 +1,34 @@
+#!/bin/sh
+set -e
+
+: "${MODEM_ADDRESS:=192.168.100.1}"
+: "${FACTORY_DEFAULTS:=0}"
+: "${DRY_RUN:=}"
+
+while getopts 'nr' opt; do
+	case "$opt" in
+		n) DRY_RUN=yes ;;
+		r) FACTORY_DEFAULTS=1 ;;
+	esac
+done
+
+ct="$(curl -s -H 'Accept: text/html' "http://${MODEM_ADDRESS}/" |
+	awk -F '</?t[rd]></?t[rd]>' '
+	$3=="Locked" && $4=="QAM256" {
+		c+=$(NF-1)
+	}
+	END {
+		print c
+	}')"
+printf 'found %d uncorrectable errors\n' "$ct"
+
+if [ "$ct" -gt 1000 ]; then
+	if test -n "${DRY_RUN}"; then
+		printf 'would issue modem reboot\n'
+	else
+		printf 'issuing modem reboot\n'
+		curl -d "Rebooting=1" -d "RestoreFactoryDefault=${FACTORY_DEFAULTS}"\
+			"http://${MODEM_ADDRESS}/goform/RgConfiguration.pl"\
+			2>&! >/dev/null
+	fi
+fi

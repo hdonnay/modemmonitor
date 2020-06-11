@@ -1,0 +1,16 @@
+[package]
+name = "modemmonitor"
+version = "0.1.0"
+authors = ["Hank Donnay <hdonnay@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+reqwest = "0.10"
+clap = "2.33"
+regex = "1.3"
+dirs = "2.0"
+futures = "0.3"
+smol = { version = "0.1", features = ["tokio02"] }
+matrix-sdk = "0.1"
