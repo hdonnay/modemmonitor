@@ -41,6 +41,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .help("homeserver for matrix notifications")
             .default_value("https://synapse.hdonnay.net/"),
         Arg::with_name("dry-run").short("n").help("dry run"),
+        Arg::with_name("dry-run-notify")
+            .short("N")
+            .help("dry run, but still notify"),
     ];
     let m = App::new(BIN_NAME)
         .author(env!("CARGO_PKG_AUTHORS"))
@@ -62,7 +65,7 @@ async fn app(opts: Opts) -> Result<(), Box<dyn std::error::Error>> {
 
     let (ct, mc) = try_join!(
         get_counts(&c, &opts.addr, &sep),
-        matrix_setup(&opts.notification.homeserver, &cfg, &cache)
+        matrix_setup(&opts.notification.homeserver, &cfg, &cache, opts.notify),
     )?;
     println!("found {} correctable errors", ct.correctable);
     println!("found {} uncorrectable errors", ct.uncorrectable);
@@ -74,7 +77,7 @@ async fn app(opts: Opts) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let body = opts.notification_message(&ct);
-    let _ = join!(notifications(&mc, &body), async {
+    let _ = join!(notifications(&mc, &body, opts.notify), async {
         println!("pausing for cancel....");
         Timer::after(Duration::from_secs(5)).await
     });
@@ -93,6 +96,7 @@ struct Opts {
     addr: Url,
     dry_run: bool,
     reset: bool,
+    notify: bool,
     correctable_threshold: u64,
     uncorrectable_threshold: u64,
     notification: NotificationOpts,
@@ -133,6 +137,7 @@ impl Default for Opts {
             addr: Url::parse("http://192.168.100.1/").unwrap(),
             dry_run: false,
             reset: false,
+            notify: true,
             correctable_threshold: 100_000,
             uncorrectable_threshold: 1000,
             notification: Default::default(),
@@ -155,7 +160,10 @@ impl TryFrom<&ArgMatches<'_>> for Opts {
         if let Some(v) = m.value_of("cthreshold") {
             opts.correctable_threshold = v.parse()?;
         }
-        opts.dry_run = m.is_present("dry-run");
+        opts.dry_run = m.is_present("dry-run") || m.is_present("dry-run-notify");
+        if m.is_present("dry-run") && !m.is_present("dry-run-notify") {
+            opts.notify = false;
+        }
         opts.reset = m.is_present("reset");
         if let Some(v) = m.value_of("homeserver") {
             opts.notification.homeserver = v.parse()?;
@@ -221,12 +229,16 @@ async fn matrix_setup(
     homeserver: &Url,
     config: &Path,
     cache: &Path,
+    notify: bool,
 ) -> Result<matrix_sdk::Client, Box<dyn std::error::Error>> {
     let mut cache = cache.to_path_buf();
     cache.push("store.json");
     let store = JsonStore::open(&cache)?;
     let matrix_cfg = matrix_sdk::ClientConfig::new().state_store(Box::new(store));
     let mc = matrix_sdk::Client::new_with_config(homeserver.clone(), matrix_cfg)?;
+    if !notify {
+        return Ok(mc);
+    }
 
     let mut config = config.to_path_buf();
     config.push("session");
@@ -278,7 +290,11 @@ async fn matrix_setup(
 async fn notifications(
     c: &matrix_sdk::Client,
     body: &str,
+    notify: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    if !notify {
+        return Ok(());
+    }
     let content = MessageEventContent::Text(TextMessageEventContent {
         body: body.to_owned(),
         format: None,
